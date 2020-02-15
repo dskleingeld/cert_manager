@@ -1,10 +1,16 @@
 [package]
-name = "cert_manager"
+name = "cert_tools"
 version = "0.1.0"
 authors = ["dskleingeld <dskleingeldgmail.com>"]
 edition = "2018"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "cert_manager"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cert_updater"
+path= "src/main.rs"
 
 [dependencies]
 actix-web = { version = "2", features = ["rustls"] }

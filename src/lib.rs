@@ -50,10 +50,14 @@ pub async fn valid_days_left(
 	}
 }
 
+/// if guided is true this will add manual checks to verify the challange
+/// server is reachable and ask for an port
 pub async fn generate_and_sign_keys(
 	application: &str,
 	domain: &str,
-	dir: &Path
+	dir: &Path,
+    guided: bool,
+    staging: bool
 ) -> Result<(), Error> {
 	println!("generating and signing new certificate and private key");
 
@@ -65,8 +69,12 @@ pub async fn generate_and_sign_keys(
 		create_dir_all(dir).unwrap();
 	}
 
-	let url = DirectoryUrl::LetsEncryptStaging; //for dev, higher rate limit
-	//let url = DirectoryUrl::LetsEncrypt; //only for deployment (LOW RATE LIMIT)
+	let url = if staging {
+        DirectoryUrl::LetsEncryptStaging //for dev, higher rate limit
+    } else {
+        DirectoryUrl::LetsEncrypt //only for deployment (LOW RATE LIMIT)
+    }; 
+     
 	let persist = FilePersist::new(dir);
 	let dir = Directory::from_url(persist, url).unwrap();
 	let account = dir.account(&format!("{}@{}", application, domain)).unwrap();
@@ -77,10 +85,12 @@ pub async fn generate_and_sign_keys(
 		create_dir_all(".tmp/www/.well-known/acme-challenge").unwrap();
 	}
 	// start file server for http challange
-	let server = host_server().expect("needs to be ran as root");
-	println!("check if the server is reachable and or press enter to continue");
-	let mut input = String::new();
-	std::io::stdin().read_line(&mut input).unwrap();
+	let server = host_server(guided).expect("needs to be ran as root");
+	if guided {
+		println!("check if the server is reachable and or press enter to continue");
+		let mut input = String::new();
+		std::io::stdin().read_line(&mut input).unwrap();
+	}
 
 	let mut attempt: u8 = 0;
 	let ord_csr =  loop { 
@@ -123,10 +133,11 @@ pub async fn generate_and_sign_keys(
 }
 
 //handles only requests for certificate challanges
-pub fn host_server() -> Result<actix_web::dev::Server, ()> {
-	if let Ok(port) = get_port() {
+pub fn host_server(guided: bool) -> Result<actix_web::dev::Server, ()> {
+	
+	let port = if guided {get_port()} else {Ok(80)};
+	if let Ok(port) = port {
 		let socket = format!("0.0.0.0:{}", port);
-		println!("socket :{}", socket);
 
 		let (tx, rx) = mpsc::channel();
 		thread::spawn(move || {

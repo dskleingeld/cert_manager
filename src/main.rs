@@ -1,6 +1,5 @@
-mod certificate_manager;
-use certificate_manager as cert;
-use certificate_manager::am_root;
+use cert_manager as cert;
+use cert_manager::am_root;
 
 use serde::{Serialize, Deserialize};
 use serde_yaml;
@@ -22,7 +21,7 @@ struct Config {
 }
 
 async fn update_cert(domain: &str, dir: &Path) -> i64 {
-    cert::generate_and_sign_keys(APP_NAME, domain, dir).await
+    cert::generate_and_sign_keys(APP_NAME, domain, dir, false, true).await
         .unwrap();
     let days = cert::valid_days_left(APP_NAME, domain, dir).await
         .unwrap()
