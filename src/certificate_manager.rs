@@ -32,6 +32,7 @@ impl From<std::io::Error> for Error {
 }
 
 pub async fn valid_days_left(
+	application: &str,
 	domain: &str,
 	dir: &Path)
  -> Result<Option<i64>, Error> {
@@ -40,7 +41,7 @@ pub async fn valid_days_left(
 	//let url = DirectoryUrl::LetsEncrypt; //only for deployment (LOW RATE LIMIT)
 	let persist = FilePersist::new(dir);
 	let dir = Directory::from_url(persist, url).unwrap();
-	let account = dir.account(&format!("dataserver@{}", domain)).unwrap();
+	let account = dir.account(&format!("{}@{}", application, domain)).unwrap();
 
 	if let Some(cert) = account.certificate(domain)?{
 		Ok(Some(cert.valid_days_left()))
@@ -50,6 +51,7 @@ pub async fn valid_days_left(
 }
 
 pub async fn generate_and_sign_keys(
+	application: &str,
 	domain: &str,
 	dir: &Path
 ) -> Result<(), Error> {
@@ -67,7 +69,7 @@ pub async fn generate_and_sign_keys(
 	//let url = DirectoryUrl::LetsEncrypt; //only for deployment (LOW RATE LIMIT)
 	let persist = FilePersist::new(dir);
 	let dir = Directory::from_url(persist, url).unwrap();
-	let account = dir.account(&format!("dataserver@{}", domain)).unwrap();
+	let account = dir.account(&format!("{}@{}", application, domain)).unwrap();
 	let mut ord_new = account.new_order(domain, &subdomains).unwrap();//&domains).unwrap();
 
 	//create dir structure for http challanges
@@ -135,6 +137,7 @@ pub fn host_server() -> Result<actix_web::dev::Server, ()> {
 				.route("/", actix_web::web::get().to(index))
 				.service(fs::Files::new("/.well-known/acme-challenge", "./.tmp/www/.well-known/acme-challenge"))
 			)
+			.workers(1)
 			.bind(&socket).expect(&format!("Can not bind to {}",socket))
 			.shutdown_timeout(5)    // <- Set shutdown timeout to 5 seconds
 			.run();
@@ -155,7 +158,7 @@ async fn index() -> impl Responder {
     HttpResponse::Ok().body("Hello world!, the certificate challange server is up")
 }
 
-fn am_root() -> bool {
+pub fn am_root() -> bool {
 	match env::var("USER") {
 		Ok(val) => val == "root",
 		Err(_e) => false,

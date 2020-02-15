@@ -9,6 +9,12 @@ edition = "2018"
 [dependencies]
 actix-web = { version = "2", features = ["rustls"] }
 actix-files = "0.2"
-acme-lib = "0.6"
 actix-rt = "1"
+
+acme-lib = "0.6"
+
 serde = "1"
+serde_yaml = "0.8.11"
+
+log = "0.4"
+simple_logger = "1"
