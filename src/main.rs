@@ -20,12 +20,25 @@ const APP_NAME: &str = "cert-manager";
 #[structopt(name = "basic")]
 struct Opt {
     /// Internal port to which external port 80 has been forwarded to
+    /// 
+    /// Using a port higher then 1024 allows running cert-updater as
+    /// normal user. It is recommended never to run a server with
+    /// evaluated (superuser) permissions.
     #[structopt(short, long)]
     port: u32,
 
-    /// Log level, options: info, warn, error
+    /// Log level, options: trace, debug, info, warn, error
     #[structopt(short, long)]
     log: log::Level,
+
+    /// Run agains high ratelimited staging acme
+    /// 
+    /// Recommanded to use for testing if a setup works as letsEncrypt
+    /// has a really low rate limit on theire non staging servers.
+    /// do not forget to remove this flag when deploying, staging server
+    /// certificates should not accepted by any browser or client.
+    #[structopt(short, long)]
+    staging: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default)]
@@ -34,8 +47,8 @@ struct Config {
     unit_files: Vec<String>,
 }
 
-fn update_cert(domain: &str, dir: &Path, port: u32) -> i64 {
-    cert::generate_and_sign_keys(APP_NAME, domain, dir, false, port)
+fn update_cert(domain: &str, dir: &Path, port: u32, staging: bool) -> i64 {
+    cert::generate_and_sign_keys(APP_NAME, domain, dir, staging, port)
         .unwrap();
     let days = cert::valid_days_left(APP_NAME, domain, dir)
         .unwrap()
@@ -46,7 +59,8 @@ fn update_cert(domain: &str, dir: &Path, port: u32) -> i64 {
 
 fn restart_services(units: &[String]){
     for unit in units {
-        let output = Command::new("systemctl")
+        let output = Command::new("sudo")
+            .arg("systemctl")
             .arg("restart")
             .arg(unit.as_str())
             .output()
@@ -65,16 +79,7 @@ fn main() -> Result<(), std::io::Error> {
     let not_done = done_copy.lock().unwrap();
     
     let opt = Opt::from_args();
-    dbg!(&opt.log);
     simple_logger::init_with_level(opt.log).unwrap();
-    dbg!();
-
-    if !am_root(){
-        error!("needs to be ran under root user, stopping");
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied, 
-            "not under root"));
-    }
 
     let config = Path::new("config.yaml");
     if !config.exists(){
@@ -121,7 +126,7 @@ fn main() -> Result<(), std::io::Error> {
         loop {
             thread::sleep(next_update);
 
-            let days_left = update_cert(&config.domain, &keys, opt.port);
+            let days_left = update_cert(&config.domain, &keys, opt.port, opt.staging);
             info!("updated certificate for: {}", &config.domain);
 
             //restart (systemd) services
