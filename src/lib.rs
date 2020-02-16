@@ -53,14 +53,30 @@ pub fn valid_days_left(
 	}
 }
 
+pub fn generate_and_sign_keys_guided(
+	application: &str,
+	domain: &str,
+	dir: &Path,
+	staging: bool,
+) -> Result<(), Error> {
+
+	let port = get_port().unwrap();
+	generate_and_sign_keys(
+		application,
+		domain,
+		dir,
+		staging,
+		port)
+}
+
 /// if guided is true this will add manual checks to verify the challange
 /// server is reachable and ask for an port
 pub fn generate_and_sign_keys(
 	application: &str,
 	domain: &str,
 	dir: &Path,
-    guided: bool,
-    staging: bool
+	staging: bool,
+	port: u32,
 ) -> Result<(), Error> {
 
 	let www_domain = format!("www.{}",&domain);
@@ -88,12 +104,12 @@ pub fn generate_and_sign_keys(
 		create_dir_all(".tmp/www/.well-known/acme-challenge").unwrap();
 	}
 	// start file server for http challange
-	let server = host_server(guided).expect("needs to be ran as root");
-	if guided {
+	let server = host_server(port).expect("needs to be ran as root");
+	/*if guided {
 		println!("check if the server is reachable and or press enter to continue");
 		let mut input = String::new();
 		std::io::stdin().read_line(&mut input).unwrap();
-	}
+	}*/
 
 	let mut attempt: u8 = 0;
 	let ord_csr =  loop { 
@@ -141,39 +157,34 @@ pub fn stop_server(server_handle: actix_web::dev::Server){
 }
 
 pub fn test_server_up_down(){
-	let server_handle = host_server(false).unwrap();
+	let server_handle = host_server(80).unwrap();
 	stop_server(server_handle);
 }
 
 //handles only requests for certificate challanges
-pub fn host_server(guided: bool) -> Result<actix_web::dev::Server, ()> {
+pub fn host_server(port: u32) -> Result<actix_web::dev::Server, ()> {
 	
-	let port = if guided {get_port()} else {Ok(80)};
-	if let Ok(port) = port {
-		let socket = format!("0.0.0.0:{}", port);
+	let socket = format!("0.0.0.0:{}", port);
 
-        let (tx, rx) = mpsc::channel();
-		thread::spawn(move || {
-        	let sys = actix_rt::System::new("http-server");
-            let addr = HttpServer::new(|| 
-                App::new()
-                .route("/", actix_web::web::get().to(index))
-                .service(fs::Files::new("/.well-known/acme-challenge", "./.tmp/www/.well-known/acme-challenge"))
-            )
-            .workers(1)
-            .bind(&socket).expect(&format!("Can not bind to {}",socket))
-            .shutdown_timeout(5)    // <- Set shutdown timeout to 5 seconds
-            .run();
+	let (tx, rx) = mpsc::channel();
+	thread::spawn(move || {
+		let sys = actix_rt::System::new("http-server");
+		let addr = HttpServer::new(|| 
+			App::new()
+			.route("/", actix_web::web::get().to(index))
+			.service(fs::Files::new("/.well-known/acme-challenge", "./.tmp/www/.well-known/acme-challenge"))
+		)
+		.workers(1)
+		.bind(&socket).expect(&format!("Can not bind to {}",socket))
+		.shutdown_timeout(5)    // <- Set shutdown timeout to 5 seconds
+		.run();
 
-            let _ = tx.send(addr);
-			let _ = sys.run();
-			dbg!("thread done");
-		});
-		let handle = rx.recv().unwrap();
-		Ok(handle)
-	} else {
-		Err(())
-	}
+		let _ = tx.send(addr);
+		let _ = sys.run();
+		dbg!("thread done");
+	});
+	let handle = rx.recv().unwrap();
+	Ok(handle)
 }
 
 

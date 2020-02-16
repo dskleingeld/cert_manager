@@ -4,6 +4,7 @@ use cert_manager::am_root;
 use serde::{Serialize, Deserialize};
 use serde_yaml;
 use log::{self, info, error, warn};
+use structopt::StructOpt;
 
 use std::fs;
 use std::path::{Path};//, PathBuf};
@@ -15,14 +16,26 @@ use std::io::{self, Read};
 
 const APP_NAME: &str = "cert-manager";
 
+#[derive(StructOpt)]
+#[structopt(name = "basic")]
+struct Opt {
+    /// Internal port to which external port 80 has been forwarded to
+    #[structopt(short, long)]
+    port: u32,
+
+    /// Log level, options: info, warn, error
+    #[structopt(short, long)]
+    log: log::Level,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 struct Config {
     domain: String,
     unit_files: Vec<String>,
 }
 
-fn update_cert(domain: &str, dir: &Path) -> i64 {
-    cert::generate_and_sign_keys(APP_NAME, domain, dir, false, true)
+fn update_cert(domain: &str, dir: &Path, port: u32) -> i64 {
+    cert::generate_and_sign_keys(APP_NAME, domain, dir, false, port)
         .unwrap();
     let days = cert::valid_days_left(APP_NAME, domain, dir)
         .unwrap()
@@ -50,7 +63,11 @@ fn main() -> Result<(), std::io::Error> {
     let done = Arc::new(Mutex::new(()));
     let done_copy = done.clone();
     let not_done = done_copy.lock().unwrap();
-    simple_logger::init_with_level(log::Level::Info).unwrap();
+    
+    let opt = Opt::from_args();
+    dbg!(&opt.log);
+    simple_logger::init_with_level(opt.log).unwrap();
+    dbg!();
 
     if !am_root(){
         error!("needs to be ran under root user, stopping");
@@ -104,7 +121,7 @@ fn main() -> Result<(), std::io::Error> {
         loop {
             thread::sleep(next_update);
 
-            let days_left = update_cert(&config.domain, &keys);
+            let days_left = update_cert(&config.domain, &keys, opt.port);
             info!("updated certificate for: {}", &config.domain);
 
             //restart (systemd) services
