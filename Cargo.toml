@@ -15,8 +15,11 @@ path= "src/main.rs"
 [dependencies]
 actix-web = { version = "2", features = ["rustls"] }
 actix-files = "0.2"
+
+async-std = "1.5"
 actix-rt = "1"
 
+futures = "0.3.4"
 acme-lib = "0.6"
 
 serde = "1"

@@ -4,14 +4,17 @@ use acme_lib::create_p384_key;
 
 use actix_web::{HttpServer, App, Responder, HttpResponse};
 use actix_files as fs;
-use std::sync::mpsc;
-use std::thread;
+use actix_rt;
+
+use log::{warn};
 
 use std::env;
+use std::sync::mpsc;
 use std::fs::create_dir_all;
 use std::fs::remove_dir_all;
 use std::io;
 use std::path::Path;
+use std::thread;
 
 #[derive(Debug)]
 pub enum Error {
@@ -31,7 +34,7 @@ impl From<std::io::Error> for Error {
 	}
 }
 
-pub async fn valid_days_left(
+pub fn valid_days_left(
 	application: &str,
 	domain: &str,
 	dir: &Path)
@@ -52,17 +55,14 @@ pub async fn valid_days_left(
 
 /// if guided is true this will add manual checks to verify the challange
 /// server is reachable and ask for an port
-pub async fn generate_and_sign_keys(
+pub fn generate_and_sign_keys(
 	application: &str,
 	domain: &str,
 	dir: &Path,
     guided: bool,
     staging: bool
 ) -> Result<(), Error> {
-	println!("generating and signing new certificate and private key");
 
-	//let (a, b) = make_domain_list(domain);
-	//let domains = [a.as_str(), b.as_str()]; //TODO do romething with this
 	let www_domain = format!("www.{}",&domain);
 	let subdomains = [www_domain.as_str()];
 	if !Path::new(dir).exists(){
@@ -70,11 +70,14 @@ pub async fn generate_and_sign_keys(
 	}
 
 	let url = if staging {
+        warn!("running against staging envirment meant for development and testing, \
+               output will not be signed with by a known CA. set staging to false \
+               to get a \"real\" certifacte");
         DirectoryUrl::LetsEncryptStaging //for dev, higher rate limit
     } else {
         DirectoryUrl::LetsEncrypt //only for deployment (LOW RATE LIMIT)
     }; 
-     
+
 	let persist = FilePersist::new(dir);
 	let dir = Directory::from_url(persist, url).unwrap();
 	let account = dir.account(&format!("{}@{}", application, domain)).unwrap();
@@ -98,12 +101,12 @@ pub async fn generate_and_sign_keys(
 		// authorized in a previous order, we might be able to
 		// skip validation. The ACME API provider decides.	
 		if let Some(ord_csr) = ord_new.confirm_validations() {
-			server.stop(false).await;
+            stop_server(server);
 			remove_dir_all(".tmp/www/").unwrap();
 			break ord_csr;
 		} 
 		if attempt > 5 {
-			server.stop(false).await;
+            stop_server(server);
 			remove_dir_all(".tmp/www/").unwrap();
 			return Err(Error::Timeout);
 		}
@@ -132,6 +135,16 @@ pub async fn generate_and_sign_keys(
 	Ok(())
 }
 
+pub fn stop_server(server_handle: actix_web::dev::Server){
+	let mut rt = actix_rt::Runtime::new().unwrap();
+	rt.block_on(server_handle.stop(false));
+}
+
+pub fn test_server_up_down(){
+	let server_handle = host_server(false).unwrap();
+	stop_server(server_handle);
+}
+
 //handles only requests for certificate challanges
 pub fn host_server(guided: bool) -> Result<actix_web::dev::Server, ()> {
 	
@@ -139,24 +152,23 @@ pub fn host_server(guided: bool) -> Result<actix_web::dev::Server, ()> {
 	if let Ok(port) = port {
 		let socket = format!("0.0.0.0:{}", port);
 
-		let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::channel();
 		thread::spawn(move || {
         	let sys = actix_rt::System::new("http-server");
+            let addr = HttpServer::new(|| 
+                App::new()
+                .route("/", actix_web::web::get().to(index))
+                .service(fs::Files::new("/.well-known/acme-challenge", "./.tmp/www/.well-known/acme-challenge"))
+            )
+            .workers(1)
+            .bind(&socket).expect(&format!("Can not bind to {}",socket))
+            .shutdown_timeout(5)    // <- Set shutdown timeout to 5 seconds
+            .run();
 
-			let addr = HttpServer::new(|| 
-				App::new()
-				.route("/", actix_web::web::get().to(index))
-				.service(fs::Files::new("/.well-known/acme-challenge", "./.tmp/www/.well-known/acme-challenge"))
-			)
-			.workers(1)
-			.bind(&socket).expect(&format!("Can not bind to {}",socket))
-			.shutdown_timeout(5)    // <- Set shutdown timeout to 5 seconds
-			.run();
-
-			let _ = tx.send(addr);
+            let _ = tx.send(addr);
 			let _ = sys.run();
+			dbg!("thread done");
 		});
-
 		let handle = rx.recv().unwrap();
 		Ok(handle)
 	} else {
